@@ -52,7 +52,8 @@ TABLE_DDL = {
             city VARCHAR,
             state VARCHAR,
             zip_code VARCHAR,
-            created_at TIMESTAMP NOT NULL
+            created_at TIMESTAMP NOT NULL,
+            updated_at TIMESTAMP
         );
     """,
     "agents": """
@@ -61,7 +62,8 @@ TABLE_DDL = {
             agent_name VARCHAR NOT NULL,
             territory VARCHAR,
             hire_date DATE,
-            license_number VARCHAR
+            license_number VARCHAR,
+            updated_at TIMESTAMP
         );
     """,
     "policies": """
@@ -75,7 +77,8 @@ TABLE_DDL = {
             end_date DATE NOT NULL,
             premium_amount DECIMAL(18,2) NOT NULL,
             status VARCHAR NOT NULL,
-            created_at TIMESTAMP NOT NULL
+            created_at TIMESTAMP NOT NULL,
+            updated_at TIMESTAMP
         );
     """,
     "coverages": """
@@ -84,7 +87,8 @@ TABLE_DDL = {
             policy_id VARCHAR NOT NULL REFERENCES policies(policy_id),
             coverage_code VARCHAR NOT NULL,
             coverage_limit INT NOT NULL,
-            deductible INT NOT NULL
+            deductible INT NOT NULL,
+            updated_at TIMESTAMP
         );
     """,
 }
@@ -113,6 +117,13 @@ def bootstrap():
         f"END IF; END $$;"
     )
 
+    # Re-running bootstrap should always sync the role's password to whatever
+    # is currently in .env, not just on first creation. Otherwise an existing
+    # role silently keeps its original password forever, and future .env
+    # changes go unnoticed until a connection fails with an auth error.
+    cur.execute(f"ALTER ROLE {app_user} WITH PASSWORD '{app_password}';")
+    print(f"Synced password for role {app_user} to current .env value.")
+
     # RDS quirk: master must grant the role to itself before it can
     # create a database owned by that role.
     cur.execute(f"GRANT {app_user} TO CURRENT_USER;")
@@ -134,9 +145,18 @@ def create_tables(conn):
     cur = conn.cursor()
     for ddl in TABLE_DDL.values():
         cur.execute(ddl)
+
+    # Safety net: if these tables were created by an earlier version of this
+    # script (before updated_at was added), add the column now rather than
+    # requiring a manual drop and recreate.
+    for table_name in TABLE_DDL:
+        cur.execute(
+            f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP;"
+        )
+
     conn.commit()
     cur.close()
-    print("Tables created (or already present).")
+    print("Tables created (or already present, including updated_at backfill).")
 
 
 def load_table(conn, table_name):
@@ -160,9 +180,24 @@ def load_table(conn, table_name):
     cur.close()
 
 
-def seed():
+def reset_tables(conn):
+    """Truncates all four tables in FK-safe order before a fresh load.
+    Use when re-running the seed against a database that already has data,
+    otherwise COPY hits primary key conflicts on the existing rows."""
+    cur = conn.cursor()
+    # Reverse dependency order: coverages and policies reference customers/
+    # agents, so they must be cleared first.
+    cur.execute("TRUNCATE TABLE coverages, policies, agents, customers;")
+    conn.commit()
+    cur.close()
+    print("Truncated customers, agents, policies, coverages.")
+
+
+def seed(reset=False):
     conn = psycopg2.connect(**APP_CONN_PARAMS)
     create_tables(conn)
+    if reset:
+        reset_tables(conn)
     for table in ["customers", "agents", "policies", "coverages"]:
         load_table(conn, table)
     conn.close()
@@ -176,9 +211,16 @@ if __name__ == "__main__":
         action="store_true",
         help="Run the one-time role and database bootstrap step first.",
     )
+    parser.add_argument(
+        "--reset",
+        action="store_true",
+        help="Truncate all four tables before loading. Use this when re-running "
+        "the seed against a database that's already been seeded, otherwise "
+        "COPY will fail with primary key conflicts on existing rows.",
+    )
     args = parser.parse_args()
 
     if args.bootstrap:
         bootstrap()
     else:
-        seed()
+        seed(reset=args.reset)

@@ -2,6 +2,8 @@
 
 This document covers provisioning the RDS PostgreSQL instance that represents Sentinel's policy admin system, and reproducing the seeded database from scratch.
 
+If you plan to use any AWS CLI commands referenced elsewhere in this project, set that up first: see [`aws_cli_setup.md`](aws_cli_setup.md).
+
 ## 1. Provision the RDS instance
 
 1. In the AWS Console search bar, type **RDS** and open the **Aurora and RDS** service.
@@ -10,6 +12,7 @@ This document covers provisioning the RDS PostgreSQL instance that represents Se
    - **Express configuration**
    - **Full configuration**
    - **Restore from S3**
+   
    Click **Full configuration**. Express configuration hides settings this project needs (public access, security group, instance identifier detail), so it's the wrong one here.
 4. Under **Engine options**, choose **PostgreSQL**, and leave the engine version at whatever is marked "Default" or "Recommended."
 5. Under **Templates**, choose **Free tier** if it's shown, or **Sandbox** if your account is on a paid plan. Either works for this project.
@@ -23,7 +26,7 @@ This document covers provisioning the RDS PostgreSQL instance that represents Se
    - If you see "Compute resource," choose **"Don't connect to an EC2 compute resource."**
    - Set **Public access** to **Yes** so the database can be reached from your local machine during development.
    - VPC security group: choose **Create new** and give it a name like `sentinel-policy-admin-sg`.
-   - Under **Additional configuration**, leave the database port at `5432`.
+   - Leave the database port at `5432`.
 9. Leave the remaining sections (Database authentication, Monitoring, Additional configuration) at their defaults and click **Create database** at the bottom of the page.
 10. Wait for the instance status to change from "Creating" to "Available" (a few minutes). Click into the instance and copy the **Endpoint** from the **Connectivity & security** tab.
 11. Lock down the inbound rule so only your IP can reach port `5432`:
@@ -33,7 +36,13 @@ This document covers provisioning the RDS PostgreSQL instance that represents Se
     - Add a rule: Type = **PostgreSQL**, Port = `5432`, Source = **My IP** (the console autofills your current public IP as a `/32`).
     - Save rules.
 
-Your IP will change over time, especially on a home or mobile connection. If `psql` starts timing out later, come back to this security group and update the "My IP" rule.
+Your IP will change over time, especially on a home or mobile connection. If `psql` or the seed script starts timing out later, that's almost always this. Instead of repeating the Console steps above, run:
+
+```bash
+./scripts/update_rds_ip_allowlist.sh
+```
+
+This looks up your current public IP, finds the security group automatically, and swaps the old rule for the new IP in one command.
 
 ## 2. Store credentials
 
@@ -48,6 +57,10 @@ PG_MASTER_PASSWORD=<master_password>
 PG_APP_USER=sentinel
 PG_APP_PASSWORD=<a_new_password_for_the_app_role>
 ```
+
+`PG_HOST`, `PG_MASTER_USER`, and `PG_MASTER_PASSWORD` come from AWS, they're whatever you set when provisioning the RDS instance in step 1.
+
+`PG_APP_PASSWORD` does not come from anywhere, you invent it yourself, any password works. It doesn't exist in Postgres yet at this point. Pick one and put it in `.env` now, before running the bootstrap step below. The bootstrap step is what actually creates the `sentinel` role using this exact value (`CREATE ROLE sentinel LOGIN PASSWORD '<what you put here>'`), so this password becomes real only after that step runs. Every later connection (seeding, extractors) authenticates against whatever value is in `.env` at that time, so if you ever regenerate `.env` from scratch, this value must match what was originally used during bootstrap, or connections will fail with an auth error.
 
 ## 3. Confirm connectivity
 
@@ -67,9 +80,34 @@ python scripts/seed_policy_admin_db.py --bootstrap
 
 This creates the `sentinel` role, grants it to the master user, then creates the `policy_admin` database owned by `sentinel`.
 
-## 5. Seed the tables
+## 5. Pull the source CSVs
 
-Place the four source CSVs (`customers.csv`, `agents.csv`, `policies.csv`, `coverages.csv`) in the folder pointed to by `SOURCE_SYSTEMS_DIR` in `.env`, then run:
+The seed script expects `customers.csv`, `agents.csv`, `policies.csv`, and `coverages.csv` to already exist in the folder pointed to by `SOURCE_SYSTEMS_DIR` in `.env` (`source_systems/` by default). These come from the shared Google Drive folder, not from this repo.
+
+Pull them automatically:
+
+```bash
+python scripts/pull_source_data.py --only policy_admin
+```
+
+Or download manually through the browser. For a first full pull, manual is faster and more reliable, it uses your authenticated Google session rather than `gdown`'s anonymous access, which Drive can rate-limit on larger folders. If you download the whole shared folder rather than just `policy_admin/`, the CSVs will land nested under `source_systems/policy_admin/`, flatten them to the top level before seeding:
+
+```bash
+mv source_systems/policy_admin/*.csv source_systems/
+rmdir source_systems/policy_admin
+```
+
+See [`source_data_pull.md`](source_data_pull.md) for both options side by side, and what to do if the Drive folder's sharing permissions block the automatic download.
+
+Confirm the files landed before continuing:
+
+```bash
+ls source_systems/
+```
+
+You should see all four CSVs sitting directly in that folder, not nested in a subfolder.
+
+## 6. Seed the tables
 
 ```bash
 python scripts/seed_policy_admin_db.py
@@ -77,7 +115,7 @@ python scripts/seed_policy_admin_db.py
 
 This creates the four tables if they do not already exist and bulk-loads each from its CSV using `COPY ... FROM STDIN`.
 
-## 6. Verify row counts
+## 7. Verify row counts
 
 Expected counts after a successful seed:
 
@@ -99,4 +137,4 @@ SELECT COUNT(*) FROM coverages;
 
 ## Reproducing from scratch
 
-To rebuild the database entirely: drop the RDS instance (or the `policy_admin` database), repeat steps 1 through 5, and confirm counts match the table above.
+To rebuild the database entirely: drop the RDS instance (or the `policy_admin` database), repeat steps 1 through 6, and confirm counts match the table above.
