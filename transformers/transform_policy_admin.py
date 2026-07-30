@@ -11,14 +11,28 @@ import argparse
 import io
 import os
 from datetime import date
+from decimal import Decimal, ROUND_HALF_UP
 
 import boto3
 import pandas as pd
 from dotenv import load_dotenv
 
+from transformers.s3_helpers import load_parquet_or_exit
+
 load_dotenv()
 
 TABLES = ["customers", "agents", "policies", "coverages"]
+
+# Landing zone / RDS table names map to the warehouse's dimension table
+# names for the processed zone output path, matching sql/ddl/create_tables.sql
+# (dim_customer, dim_agent, dim_policy, dim_coverage) rather than the raw
+# source table names.
+ENTITY_NAMES = {
+    "customers": "dim_customer",
+    "agents": "dim_agent",
+    "policies": "dim_policy",
+    "coverages": "dim_coverage",
+}
 
 CANONICAL_CASE_COLUMNS = {
     "policies": ["coverage_type", "status"],
@@ -43,14 +57,24 @@ TIMESTAMP_COLUMNS = {
 
 def read_landing_parquet(s3_client, bucket, table, run_date):
     key = f"source=policy_admin/table={table}/day={run_date}/{table}.parquet"
-    buffer = io.BytesIO()
-    s3_client.download_fileobj(bucket, key, buffer)
-    buffer.seek(0)
-    return pd.read_parquet(buffer)
+    return load_parquet_or_exit(s3_client, bucket, key, table, run_date)
+
+
+def to_decimal(value):
+    """Casts a value to a real decimal.Decimal, not a float, rounded to 2
+    places. Going through str(value) first (rather than float(value))
+    avoids introducing binary floating-point rounding error, and handles
+    values that already arrive as Decimal (psycopg2's native type for
+    NUMERIC/DECIMAL columns) without loss."""
+    if value is None:
+        return None
+    if isinstance(value, float) and pd.isna(value):
+        return None
+    return Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
 def transform_table(df, table_name):
-    df = df.drop_duplicates()
+    df = df.drop_duplicates().copy()
 
     for col in CANONICAL_CASE_COLUMNS.get(table_name, []):
         if col in df.columns:
@@ -58,7 +82,7 @@ def transform_table(df, table_name):
 
     for col in DECIMAL_COLUMNS.get(table_name, []):
         if col in df.columns:
-            df[col] = df[col].astype(float).round(2)
+            df[col] = df[col].apply(to_decimal)
 
     for col in DATE_COLUMNS.get(table_name, []):
         if col in df.columns:
@@ -72,13 +96,14 @@ def transform_table(df, table_name):
 
 
 def write_parquet(s3_client, bucket, df, table_name, run_date):
+    entity_name = ENTITY_NAMES[table_name]
     buffer = io.BytesIO()
     df.to_parquet(buffer, index=False, engine="pyarrow", compression="snappy")
     buffer.seek(0)
 
-    key = f"{table_name}/day={run_date}/{table_name}.parquet"
+    key = f"{entity_name}/day={run_date}/{entity_name}.parquet"
     s3_client.upload_fileobj(buffer, bucket, key)
-    print(f"{table_name}: wrote {len(df)} rows to s3://{bucket}/{key}")
+    print(f"{entity_name}: wrote {len(df)} rows to s3://{bucket}/{key}")
 
 
 def run(run_date):
