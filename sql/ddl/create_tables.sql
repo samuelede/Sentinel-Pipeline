@@ -83,6 +83,14 @@ CREATE TABLE IF NOT EXISTS staging.stg_weather_daily (
     severity VARCHAR
 );
 
+CREATE TABLE IF NOT EXISTS staging.stg_billing_transactions (
+    transaction_id VARCHAR,
+    policy_id VARCHAR,
+    transaction_date DATE,
+    transaction_type VARCHAR,
+    amount DECIMAL(18,2)
+);
+
 -- ===== Warehouse tables (target of MERGE from staging) =====
 
 CREATE TABLE IF NOT EXISTS dim_customer (
@@ -162,4 +170,12 @@ CREATE TABLE IF NOT EXISTS weather_daily (
     weather_code INT,
     severity VARCHAR,
     PRIMARY KEY (weather_date, zip_code)
+);
+
+CREATE TABLE IF NOT EXISTS billing_transactions (
+    transaction_id VARCHAR NOT NULL PRIMARY KEY,
+    policy_id VARCHAR NOT NULL,
+    transaction_date DATE NOT NULL,
+    transaction_type VARCHAR NOT NULL,
+    amount DECIMAL(18,2) NOT NULL
 );
