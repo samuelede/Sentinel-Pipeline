@@ -62,6 +62,37 @@ CONTRACTS = {
         },
         "required_not_null": ["coverage_id", "policy_id", "coverage_code"],
     },
+    "claims_raw": {
+        # Describes the raw claim JSON as it lands from source_systems, before
+        # transform_claims.py flattens it. Field names here match the real
+        # source structure confirmed against actual claim files: "status"
+        # (not "claim_status"), a nested "incident_location" object rather
+        # than a flat "incident_zip", and an "events" list.
+        "columns": {
+            "claim_id": "string",
+            "policy_id": "string",
+            "customer_id": "string",
+            "incident_date": "date",
+            "report_date": "date",
+            "incident_location": "dict",
+            "incident_type": "string",
+            "description": "string",
+            "status": "string",
+            "claim_amount": "decimal",
+            "approved_amount": "decimal",
+            "created_at": "timestamp",
+            "events": "list",
+        },
+        "required_not_null": [
+            "claim_id",
+            "policy_id",
+            "customer_id",
+            "incident_date",
+            "incident_location",
+            "status",
+            "claim_amount",
+        ],
+    },
     "claims_fact": {
         "columns": {
             "claim_id": "string",
