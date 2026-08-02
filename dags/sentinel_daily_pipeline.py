@@ -19,7 +19,7 @@ from airflow.operators.python import PythonOperator
 from airflow.operators.bash import BashOperator
 
 from extractors import extract_policy_admin, extract_claims, extract_billing, extract_weather
-from validators import validate
+from validators import validate_ge
 from transformers import (
     transform_claims,
     transform_policy_admin,
@@ -73,8 +73,8 @@ with DAG(
     # ---- Validation ----
     validate_task = PythonOperator(
         task_id="validate_landing_zone",
-        python_callable=lambda **ctx: validate.run(
-            ["customers", "agents", "policies", "coverages", "billing", "weather"],
+        python_callable=lambda **ctx: validate_ge.run(
+            validate_ge.ALL_DATASETS,
             _run_date(ctx),
         ),
     )
@@ -101,17 +101,25 @@ with DAG(
     )
 
     # ---- Snowflake load ----
+    # cwd is required here: BashOperator runs its command from a fresh
+    # temp directory by default (visible in task logs as "Tmp dir root
+    # location: /tmp"), not from the container's working_dir, so the
+    # relative sql/merge/... paths below would otherwise fail with
+    # "No such file or directory" regardless of what working_dir is set
+    # to in docker-compose.airflow.yml.
     copy_into_staging_task = BashOperator(
         task_id="copy_into_staging",
         bash_command=(
-            "snowsql -f sql/merge/copy_into_staging.sql "
+            "snowsql -c sentinel -f sql/merge/copy_into_staging.sql "
             "-D RUN_DATE={{ ds }}"
         ),
+        cwd="/opt/airflow/project",
     )
 
     merge_warehouse_task = BashOperator(
         task_id="merge_dimensions_and_fact",
-        bash_command="snowsql -f sql/merge/merge_dimensions_and_fact.sql",
+        bash_command="snowsql -c sentinel -f sql/merge/merge_dimensions_and_fact.sql",
+        cwd="/opt/airflow/project",
     )
 
     # ---- Dependencies ----
