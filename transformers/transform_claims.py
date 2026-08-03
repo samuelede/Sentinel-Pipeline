@@ -50,9 +50,9 @@ def flatten_claims(claims):
                 "customer_id": claim["customer_id"],
                 "incident_date": claim["incident_date"],
                 "report_date": claim["report_date"],
-                "incident_zip": claim["incident_zip"],
+                "incident_zip": claim["incident_location"]["zip"],
                 "incident_type": claim["incident_type"],
-                "claim_status": claim["claim_status"],
+                "claim_status": claim["status"],
                 "claim_amount": Decimal(str(claim["claim_amount"])),
                 "approved_amount": (
                     Decimal(str(claim["approved_amount"]))
@@ -64,13 +64,18 @@ def flatten_claims(claims):
             }
         )
 
+        payment_sequence = 0
         for event in events:
             if event.get("event_type") == "Payment_Issued":
+                payment_sequence += 1
+                # The source has no natural payment_id, synthesize a stable
+                # one from the claim_id and a per-claim sequence number.
+                payment_id = f"{claim['claim_id']}-PMT-{payment_sequence:02d}"
                 payment_rows.append(
                     {
-                        "payment_id": event["payment_id"],
+                        "payment_id": payment_id,
                         "claim_id": claim["claim_id"],
-                        "payment_date": event["payment_date"],
+                        "payment_date": event["timestamp"],
                         "payment_amount": Decimal(str(event["payment_amount"])),
                         "payment_type": event["payment_type"],
                         "adjuster_id": event.get("adjuster_id"),

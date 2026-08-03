@@ -123,3 +123,18 @@ WHEN NOT MATCHED THEN INSERT (
     source.weather_date, source.zip_code, source.precipitation_mm, source.max_wind_kmh,
     source.max_temp_c, source.min_temp_c, source.weather_code, source.severity
 );
+
+MERGE INTO billing_transactions AS target
+USING staging.stg_billing_transactions AS source
+ON target.transaction_id = source.transaction_id
+WHEN MATCHED THEN UPDATE SET
+    policy_id = source.policy_id,
+    transaction_date = source.transaction_date,
+    transaction_type = source.transaction_type,
+    amount = source.amount
+WHEN NOT MATCHED THEN INSERT (
+    transaction_id, policy_id, transaction_date, transaction_type, amount
+) VALUES (
+    source.transaction_id, source.policy_id, source.transaction_date,
+    source.transaction_type, source.amount
+);

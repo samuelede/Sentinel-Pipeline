@@ -5,19 +5,23 @@ are moved to the S3 quarantine prefix along with a validation_report.json
 describing every failed expectation, and an alert is logged.
 
 Usage:
-    python validators/validate.py --dataset billing --day 2026-01-15
-    python validators/validate.py --all --day 2026-01-15
+    python -m validators.validate --dataset billing --day 2026-01-15
+    python -m validators.validate --all --day 2026-01-15
 """
 
 import argparse
 import io
 import json
+import sys
 from datetime import date
 
 import boto3
 import pandas as pd
+from dotenv import load_dotenv
 
 from validators.contracts import CONTRACTS
+
+load_dotenv()
 
 S3_BUCKET_ENV = "S3_LANDING_BUCKET"
 
@@ -84,12 +88,14 @@ def quarantine_file(s3_client, bucket, key, failures):
 def validate_dataset(s3_client, bucket, dataset, run_date):
     if dataset not in DATASET_PREFIXES:
         print(f"No S3 prefix mapping for dataset '{dataset}', skipping.")
-        return
+        return 0, 0
 
     contract = CONTRACTS[dataset]
     prefix = f"{DATASET_PREFIXES[dataset]}/day={run_date}/"
 
     response = s3_client.list_objects_v2(Bucket=bucket, Prefix=prefix)
+    passed = 0
+    failed = 0
     for obj in response.get("Contents", []):
         key = obj["Key"]
         if not key.endswith(".parquet"):
@@ -100,8 +106,12 @@ def validate_dataset(s3_client, bucket, dataset, run_date):
 
         if failures:
             quarantine_file(s3_client, bucket, key, failures)
+            failed += 1
         else:
             print(f"PASSED: {key} ({len(df)} rows)")
+            passed += 1
+
+    return passed, failed
 
 
 def run(datasets, run_date):
@@ -110,8 +120,15 @@ def run(datasets, run_date):
     bucket = os.environ[S3_BUCKET_ENV]
     s3_client = boto3.client("s3")
 
+    total_passed = 0
+    total_failed = 0
     for dataset in datasets:
-        validate_dataset(s3_client, bucket, dataset, run_date)
+        passed, failed = validate_dataset(s3_client, bucket, dataset, run_date)
+        total_passed += passed
+        total_failed += failed
+
+    print("")
+    print(f"=== Summary: {total_passed} passed, {total_failed} quarantined (day={run_date}) ===")
 
 
 if __name__ == "__main__":
@@ -119,11 +136,28 @@ if __name__ == "__main__":
     parser.add_argument("--dataset", help="Single dataset name to validate")
     parser.add_argument("--all", action="store_true", help="Validate all known datasets")
     parser.add_argument("--day", default=str(date.today()), help="Run date, YYYY-MM-DD")
+    parser.add_argument(
+        "--debug", action="store_true", help="Show the full Python traceback on error instead of a clean summary"
+    )
     args = parser.parse_args()
 
-    if args.all:
-        run(list(DATASET_PREFIXES.keys()), args.day)
-    elif args.dataset:
-        run([args.dataset], args.day)
-    else:
-        parser.error("Specify --dataset <name> or --all")
+    try:
+        if args.all:
+            run(list(DATASET_PREFIXES.keys()), args.day)
+        elif args.dataset:
+            run([args.dataset], args.day)
+        else:
+            parser.error("Specify --dataset <name> or --all")
+    except Exception as e:
+        if args.debug:
+            raise
+        print(f"\nERROR: {type(e).__name__}: {e}")
+        if isinstance(e, (KeyError, AttributeError, ImportError, ModuleNotFoundError)):
+            print(
+                "This kind of error often means a local file is out of date "
+                "(e.g. validators/contracts.py) compared to what this script "
+                "expects, rather than a real data problem. Confirm your local "
+                "copies are current before assuming otherwise."
+            )
+        print("Re-run with --debug to see the full traceback.")
+        sys.exit(1)

@@ -1,0 +1,81 @@
+# Single-container Airflow setup for local development, using the
+# built-in `airflow standalone` command, which handles DB init, admin
+# user creation, and starts both the webserver and scheduler in one go.
+# This sidesteps Airflow's lack of native Windows support entirely,
+# since everything runs inside a Linux container regardless of host OS.
+#
+# Usage:
+#   ./scripts/run_airflow.sh
+#
+# Or manually:
+#   docker compose -f docker-compose.airflow.yml up --build
+
+services:
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: sentinel-mailpit
+    ports:
+      - "8025:8025"   # Web UI: view caught emails here
+      - "1025:1025"   # SMTP port Airflow sends to
+
+  airflow:
+    build:
+      context: .
+      dockerfile: docker/airflow/Dockerfile
+    container_name: sentinel-airflow
+    depends_on:
+      - mailpit
+    ports:
+      - "8080:8080"
+    environment:
+      - PYTHONPATH=/opt/airflow/project
+      - AIRFLOW__CORE__DAGS_FOLDER=/opt/airflow/project/dags
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      # Maps .env's AIRFLOW_ADMIN_USERNAME/PASSWORD to the exact variable
+      # names `airflow standalone` reads on first run, so the web UI
+      # login is a known, documented value instead of a random password
+      # you'd otherwise have to find in the terminal output.
+      - _AIRFLOW_WWW_USER_USERNAME=${AIRFLOW_ADMIN_USERNAME}
+      - _AIRFLOW_WWW_USER_PASSWORD=${AIRFLOW_ADMIN_PASSWORD}
+      # Points Airflow's email_on_failure alerting at Mailpit instead of
+      # a real mail server. No real credentials involved, catches every
+      # alert in a local web UI (http://localhost:8025) so you can
+      # confirm alerting actually works without risking real inbox
+      # credentials in a dev environment torn down between sessions.
+      - AIRFLOW__SMTP__SMTP_HOST=mailpit
+      - AIRFLOW__SMTP__SMTP_PORT=1025
+      - AIRFLOW__SMTP__SMTP_STARTTLS=False
+      - AIRFLOW__SMTP__SMTP_SSL=False
+      - AIRFLOW__SMTP__SMTP_MAIL_FROM=sentinel-pipeline@localhost
+    env_file:
+      - .env
+    volumes:
+      # Mount the whole repo so the DAG's `from extractors import ...`
+      # style imports resolve, and so extractors/transformers can read
+      # and write source_systems/ and pick up .env directly.
+      - .:/opt/airflow/project
+      # AWS credentials from the host, read-only. boto3 inside the
+      # container looks here automatically, same as on the host, no
+      # need to put AWS keys in .env.
+      - ${HOME}/.aws:/home/airflow/.aws:ro
+      # Snowflake connection config (and private key, if using key-pair
+      # auth for MFA-enabled accounts) from the host. Mounted as
+      # individual files, not the whole ~/.snowsql directory: snowsql's
+      # actual binary payload lives inside that same directory (baked
+      # into the image at build time), and a directory-level mount would
+      # hide it entirely, causing "SnowSQL was not found in
+      # /home/airflow/.snowsql" even though it's genuinely installed.
+      # Mounting just these two files leaves the rest of the directory
+      # (including that payload, and write access for snowsql's own log
+      # files) exactly as the image built it.
+      #
+      # config.docker (not your native config): private_key_path in your
+      # native Windows config is an absolute Windows path
+      # (C:/Users/.../snowflake_rsa_key.p8), which doesn't exist inside
+      # the Linux container. config.docker is a copy of your normal
+      # config with just that one line pointing at the in-container path
+      # instead, see docs/snowflake_setup.md.
+      - ${HOME}/.snowsql/config.docker:/home/airflow/.snowsql/config:ro
+      - ${HOME}/.snowsql/snowflake_rsa_key.p8:/home/airflow/.snowsql/snowflake_rsa_key.p8:ro
+    working_dir: /opt/airflow/project
+    command: standalone

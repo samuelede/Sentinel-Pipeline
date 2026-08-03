@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-SOURCE_DIR = Path(os.environ.get("SOURCE_SYSTEMS_DIR", "./source_systems")) / "claims"
+SOURCE_DIR = Path(os.environ.get("SOURCE_SYSTEMS_DIR", "./source_systems")) / "sftp_claim_source"
 S3_BUCKET = os.environ["S3_LANDING_BUCKET"]
 
 

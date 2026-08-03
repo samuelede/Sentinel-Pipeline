@@ -2,22 +2,22 @@
 -- $RUN_DATE should be substituted by the orchestrator (Airflow) at run time.
 
 COPY INTO staging.stg_customers
-FROM @sentinel_s3_stage/customers/day=$RUN_DATE/
+FROM @sentinel_s3_stage/dim_customer/day=$RUN_DATE/
 FILE_FORMAT = parquet_format
 MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE;
 
 COPY INTO staging.stg_agents
-FROM @sentinel_s3_stage/agents/day=$RUN_DATE/
+FROM @sentinel_s3_stage/dim_agent/day=$RUN_DATE/
 FILE_FORMAT = parquet_format
 MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE;
 
 COPY INTO staging.stg_policies
-FROM @sentinel_s3_stage/policies/day=$RUN_DATE/
+FROM @sentinel_s3_stage/dim_policy/day=$RUN_DATE/
 FILE_FORMAT = parquet_format
 MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE;
 
 COPY INTO staging.stg_coverages
-FROM @sentinel_s3_stage/coverages/day=$RUN_DATE/
+FROM @sentinel_s3_stage/dim_coverage/day=$RUN_DATE/
 FILE_FORMAT = parquet_format
 MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE;
 
@@ -33,5 +33,10 @@ MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE;
 
 COPY INTO staging.stg_weather_daily
 FROM @sentinel_s3_stage/weather_daily/day=$RUN_DATE/
+FILE_FORMAT = parquet_format
+MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE;
+
+COPY INTO staging.stg_billing_transactions
+FROM @sentinel_s3_stage/billing_transactions/day=$RUN_DATE/
 FILE_FORMAT = parquet_format
 MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE;

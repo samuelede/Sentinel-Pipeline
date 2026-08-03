@@ -1,7 +1,17 @@
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
+*.pyc
 *$py.class
+
+#Misc
+source_systems/
+airflow/logs/
+airflow/airflow.db
+airflow/airflow.cfg
+*.parquet
+.DS_Store
+great_expectations/uncommitted/
 
 # C extensions
 *.so
@@ -25,6 +35,7 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+source_systems/
 
 # PyInstaller
 #   Usually these files are written by a python script from a template
