@@ -17,6 +17,7 @@ from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 from airflow.operators.bash import BashOperator
+from airflow.utils.trigger_rule import TriggerRule
 
 from extractors import extract_policy_admin, extract_claims, extract_billing, extract_weather
 from validators import validate_ge
@@ -107,18 +108,39 @@ with DAG(
     # relative sql/merge/... paths below would otherwise fail with
     # "No such file or directory" regardless of what working_dir is set
     # to in docker-compose.airflow.yml.
+    #
+    # trigger_rule=ALL_DONE (not the default ALL_SUCCESS): if one
+    # source has no data for this day (a normal, expected condition in
+    # this environment, e.g. billing and claims only exist for
+    # different, non-overlapping date ranges), its transform task
+    # exits non-zero and Airflow marks it failed. With the default
+    # trigger rule, that alone would block this task from running at
+    # all, meaning ANY single missing source blocks the whole day's
+    # warehouse load even for sources that DO have data. ALL_DONE lets
+    # this proceed once every upstream task has finished, regardless of
+    # outcome. Snowflake's COPY INTO already handles an empty S3 prefix
+    # gracefully (loads 0 rows, doesn't error), so the sources that did
+    # have data still load correctly, only the missing one's staging
+    # table simply doesn't get new rows that day.
+    # -o exit_on_error=true is required: by default, snowsql does NOT
+    # exit with a non-zero code just because a SQL statement inside the
+    # script errored, it prints the error and keeps going, then still
+    # exits 0. Without this flag, a genuine COPY INTO/MERGE failure
+    # would show up as a false "success" in Airflow, exactly like
+    # copy_into_staging did here.
     copy_into_staging_task = BashOperator(
         task_id="copy_into_staging",
         bash_command=(
-            "snowsql -c sentinel -f sql/merge/copy_into_staging.sql "
-            "-D RUN_DATE={{ ds }}"
+            "snowsql -c sentinel -o exit_on_error=true -o variable_substitution=true "
+            "-f sql/merge/copy_into_staging.sql -D RUN_DATE={{ ds }}"
         ),
         cwd="/opt/airflow/project",
+        trigger_rule=TriggerRule.ALL_DONE,
     )
 
     merge_warehouse_task = BashOperator(
         task_id="merge_dimensions_and_fact",
-        bash_command="snowsql -c sentinel -f sql/merge/merge_dimensions_and_fact.sql",
+        bash_command="snowsql -c sentinel -o exit_on_error=true -f sql/merge/merge_dimensions_and_fact.sql",
         cwd="/opt/airflow/project",
     )
 
