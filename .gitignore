@@ -11,7 +11,11 @@ airflow/airflow.db
 airflow/airflow.cfg
 *.parquet
 .DS_Store
+snowflake_rsa_key.p8
+snowflake_rsa_key.pub
+validate_output.txt
 great_expectations/uncommitted/
+validators/expectation_suites
 
 # C extensions
 *.so
