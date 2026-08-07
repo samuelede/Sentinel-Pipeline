@@ -129,8 +129,33 @@ Primary key: `(weather_date, zip_code)`.
 | weather_code | INT | WMO weather classification code |
 | severity | VARCHAR | calm / moderate / extreme_cold / severe |
 
+## billing_transactions
+
+Premium charges, payments, and lapse-related transactions from the billing system. Sourced from a nightly CSV export.
+
+Primary key: `transaction_id`. Foreign key: `policy_id`.
+
+| Column | Type | Description |
+|---|---|---|
+| transaction_id | VARCHAR | Unique transaction identifier (PK) |
+| policy_id | VARCHAR | FK to dim_policy |
+| transaction_date | DATE | Date the transaction was recorded |
+| transaction_type | VARCHAR | Not fully documented upstream, run `SELECT DISTINCT transaction_type FROM billing_transactions` before relying on this for reconciliation logic |
+| amount | DECIMAL(18,2) | Transaction amount |
+
 ## Data Model
 
-Star schema with `claims_fact` at the center, joined to four conformed dimensions (`dim_customer`, `dim_agent`, `dim_policy`, `dim_coverage`) and a `payments` table linked via `claim_id`. `weather_daily` is a separate enrichment table joined to `claims_fact` at the `(incident_zip, incident_date)` grain.
+Star schema with `claims_fact` at the center, joined to four conformed dimensions (`dim_customer`, `dim_agent`, `dim_policy`, `dim_coverage`) and a `payments` table linked via `claim_id`. `weather_daily` is a separate enrichment table joined to `claims_fact` at the `(incident_zip, incident_date)` grain. `billing_transactions` joins to `dim_policy` on `policy_id` and is not otherwise connected to the claims side of the model.
+
+## Analytics Views
+
+Built in `sql/views/create_analytics_views.sql`, answer the case study's headline business questions directly:
+
+| View | Answers |
+|---|---|
+| `analytics_loss_ratio_by_agent_territory` | Loss ratio (claims / premium) per agent and territory, both claim-amount and approved-amount based |
+| `analytics_claim_frequency_by_zip` | Claim counts and totals by incident zip code |
+| `analytics_weather_fraud_review_flags` | Comprehensive claims filed with no severe weather on record for that zip/date, a candidate list for review, not a fraud determination |
+| `analytics_billed_vs_collected_reconciliation` | Billed premium vs. actual billing transaction totals per policy, flags under/over-collection |
 
 Dimensions hold current state only in this initial build. Historical state tracking (Slowly Changing Dimensions Type 2) is a planned future enhancement, scoped out of v1 to keep the architecture approachable and the timeline realistic. The model retains surrogate-free natural keys (`policy_id`, `customer_id`, `agent_id`) to simplify joins and debugging during initial development.
