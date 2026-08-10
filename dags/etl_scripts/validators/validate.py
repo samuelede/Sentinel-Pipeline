@@ -19,7 +19,7 @@ import boto3
 import pandas as pd
 from dotenv import load_dotenv
 
-from validators.contracts import CONTRACTS
+from etl_scripts.validators.contracts import CONTRACTS
 
 load_dotenv()
 

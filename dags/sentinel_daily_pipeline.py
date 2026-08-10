@@ -19,9 +19,9 @@ from airflow.operators.python import PythonOperator
 from airflow.operators.bash import BashOperator
 from airflow.utils.trigger_rule import TriggerRule
 
-from extractors import extract_policy_admin, extract_claims, extract_billing, extract_weather
-from validators import validate_ge
-from transformers import (
+from etl_scripts.extractors import extract_policy_admin, extract_claims, extract_billing, extract_weather
+from etl_scripts.validators import validate_ge
+from etl_scripts.transformers import (
     transform_claims,
     transform_policy_admin,
     transform_billing,

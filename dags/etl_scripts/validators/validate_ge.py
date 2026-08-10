@@ -2,7 +2,7 @@
 Validates each landing zone file against its schema contract using a real
 Great Expectations Data Context: an ephemeral context with a pandas
 Datasource, one whole-dataframe Batch Definition per dataset, and an
-ExpectationSuite built from validators/contracts.py using
+ExpectationSuite built from etl_scripts.validators/contracts.py using
 ExpectColumnToExist, ExpectColumnValuesToNotBeNull, and
 ExpectColumnValuesToBeInTypeList (as a type/parseability check).
 
@@ -37,8 +37,8 @@ from great_expectations.expectations import (
     ExpectColumnValuesToNotBeNull,
 )
 
-from validators.contracts import CONTRACTS
-from validators.validate import (
+from etl_scripts.validators.contracts import CONTRACTS
+from etl_scripts.validators.validate import (
     DATASET_PREFIXES,
     S3_BUCKET_ENV,
     load_parquet_from_s3,
