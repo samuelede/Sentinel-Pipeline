@@ -68,7 +68,9 @@ sentinel-pipeline/
 ├── docker-compose.airflow.yml          # Single-container Airflow setup, see docs/airflow_setup.md
 ├── sql/
 │   ├── ddl/                            # Snowflake table definitions (fact, dims, payments, weather, stage)
-│   └── merge/                          # COPY INTO and MERGE statements per table
+│   ├── merge/                          # COPY INTO and MERGE statements per table
+│   ├── views/                          # Analytics views answering the case study's business questions
+│   └── checks/                         # Idempotency verification query
 ├── source_systems/                     # Local raw source data (gitignored)
 ├── docs/
 │   ├── architecture-diagram.svg
@@ -215,6 +217,20 @@ See [`docs/aws_teardown.md`](docs/aws_teardown.md) for the manual step-by-step b
 ## Data Quality
 
 Landing files are validated against schema contracts defined in `validators/contracts.py` (column existence, type/parseability, required non-null fields) before promotion to the processed zone. Files that fail validation are routed to `s3://sentinel-landing/quarantine/` along with a `validation_report.json` detailing every failed expectation, and an alert is raised.
+
+## Analytics Views
+
+```bash
+snowsql -c sentinel -f sql/views/create_analytics_views.sql
+```
+
+Creates four views in `ANALYTICS` answering the case study's headline questions (loss ratio by agent/territory, claim frequency by zip, weather-context fraud review flags, billed-vs-collected reconciliation), see [`docs/data_dictionary.md`](docs/data_dictionary.md) for what each one covers.
+
+To verify idempotency directly (no duplicate rows regardless of how many times a day has been re-run):
+
+```bash
+snowsql -c sentinel -f sql/checks/idempotency_check.sql
+```
 
 ## Testing
 
