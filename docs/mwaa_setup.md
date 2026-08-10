@@ -2,6 +2,8 @@
 
 Provisions real Amazon MWAA (managed cloud Airflow), distinct from `docker-compose.airflow.yml` (the local Docker Airflow used for development). This is genuinely expensive to leave running, read the cost warning before doing anything here.
 
+This doc covers infrastructure only, getting the environment itself into an `AVAILABLE` state. See [`docs/mwaa_deploy.md`](mwaa_deploy.md) for actually putting the DAG on it.
+
 ## Cost warning
 
 Unlike RDS free tier or a few S3 buckets, MWAA is a real ongoing cost: the `mw1.small` environment alone runs roughly $0.49/hour, plus worker costs, plus the NAT Gateway (~$0.045/hour + data processing). Left running continuously, that's on the order of **$350-500+/month**. Always pair a session with `teardown_mwaa.sh` when you're done, the same discipline already used for RDS/S3 in this project, just with much higher stakes if forgotten.
@@ -61,12 +63,20 @@ Since `sentinel-pipeline-dev` is deliberately never given MWAA/IAM/Secrets Manag
 aws mwaa get-environment --name sentinel-mwaa --query "Environment.Status" --profile Samuel --region us-east-2
 ```
 
-If you'd rather not pass `--profile` every time you check status, `AWSMWAAFullConsoleAccess` alone (not `IAMFullAccess`) is low-risk enough to attach directly to `sentinel-pipeline-dev`, same tier as the S3/EC2/RDS grants elsewhere in this project:
+If you'd rather not pass `--profile` every time you check status, `AmazonMWAAFullConsoleAccess` alone (not `IAMFullAccess`) is low-risk enough to attach directly to `sentinel-pipeline-dev`, same tier as the S3/EC2/RDS grants elsewhere in this project:
 
 ```bash
 aws iam attach-user-policy --user-name sentinel-pipeline-dev \
-  --policy-arn arn:aws:iam::aws:policy/AWSMWAAFullConsoleAccess --profile Samuel
+  --policy-arn arn:aws:iam::aws:policy/AmazonMWAAFullConsoleAccess --profile Samuel
 ```
+
+**When you're done with any `Samuel`-scoped work, unset it immediately, don't wait until you need the default profile back:**
+
+```bash
+unset AWS_PROFILE
+```
+
+`export AWS_PROFILE=Samuel` doesn't expire, it stays active for every command in that terminal window until you either unset it or close the window. Every plain `aws` command afterward, even ones that have nothing to do with MWAA, silently runs as `Samuel` instead of your regular pipeline identity. This has already caused a real false alarm in this project: `aws s3 ls s3://sentinel-landing-sm/...` returned `NoSuchBucket`, not because the bucket was gone, but because `Samuel` was never granted access to it, `sentinel-pipeline-dev` was. Run `aws configure list` any time an AWS command gives a confusing result, if it shows `profile: Samuel` and you didn't mean to still be using it, that's almost certainly the cause.
 
 ## Checking status
 
@@ -118,6 +128,6 @@ aws ec2 describe-vpcs --profile Samuel --region us-east-2
 
 All three should come back empty (aside from your account's default VPC, which is fine to leave, it's free).
 
-## What's still outstanding after this
+## Next: deploy to this environment
 
-The DAG currently imports `extractors`, `validators`, `transformers` as top-level packages mounted alongside `dags/`, this works for the local Docker setup but doesn't match how MWAA actually works (MWAA only puts the `dags/` folder itself on `sys.path`). Before deploying to this environment, the DAG's supporting code needs to be consolidated into a single `etl_scripts` package placed inside `dags/`.
+Once the environment shows `AVAILABLE`, this doc is done, provisioning the infrastructure doesn't put anything runnable on it yet. Head to [`docs/mwaa_deploy.md`](mwaa_deploy.md) to continue: it covers the one-time `etl_scripts` restructuring this environment needs (MWAA only puts the `dags/` folder itself on `sys.path`, not the repo root, so the DAG's current top-level `extractors`/`validators`/`transformers` layout won't import correctly here as-is), then the actual deploy, GitHub Actions automation, triggering, and CloudWatch debugging.

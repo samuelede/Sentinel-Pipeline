@@ -360,7 +360,14 @@ aws mwaa create-environment \
   --execution-role-arn "$EXECUTION_ROLE_ARN" \
   --environment-class "mw1.small" \
   --network-configuration "SubnetIds=${PRIVATE_SUBNET_1},${PRIVATE_SUBNET_2},SecurityGroupIds=${SG_ID}" \
-  --webserver-access-mode "PUBLIC_ONLY"
+  --webserver-access-mode "PUBLIC_ONLY" \
+  --logging-configuration '{
+    "DagProcessingLogs": {"Enabled": true, "LogLevel": "INFO"},
+    "SchedulerLogs": {"Enabled": true, "LogLevel": "INFO"},
+    "TaskLogs": {"Enabled": true, "LogLevel": "INFO"},
+    "WebserverLogs": {"Enabled": true, "LogLevel": "INFO"},
+    "WorkerLogs": {"Enabled": true, "LogLevel": "INFO"}
+  }'
 
 echo ""
 echo "MWAA environment creation started. This takes 20-30 minutes."
