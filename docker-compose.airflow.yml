@@ -28,7 +28,7 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - PYTHONPATH=/opt/airflow/project
+      - PYTHONPATH=/opt/airflow/project/dags:/opt/airflow/project
       - AIRFLOW__CORE__DAGS_FOLDER=/opt/airflow/project/dags
       - AIRFLOW__CORE__LOAD_EXAMPLES=False
       # Maps .env's AIRFLOW_ADMIN_USERNAME/PASSWORD to the exact variable

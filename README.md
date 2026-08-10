@@ -31,66 +31,26 @@ Star schema centered on `claims_fact`, joined to four conformed dimensions (`dim
 | Orchestration | Apache Airflow |
 | Source DB | Amazon RDS (PostgreSQL) |
 
-## Project Structure
 
+## Project Structure
+ 
 ```
 sentinel-pipeline/
-├── dags/
-│   └── sentinel_daily_pipeline.py      # Airflow DAG: extract, validate, transform, load
-├── extractors/
-│   ├── extract_policy_admin.py         # PostgreSQL to S3 landing (customers, agents, policies, coverages)
-│   ├── extract_claims.py               # SFTP/S3 JSON to S3 landing
-│   ├── extract_billing.py              # CSV to S3 landing (grouped by transaction_date)
-│   └── extract_weather.py              # Open-Meteo API to S3 landing (trailing 7 day window)
-├── validators/
-│   ├── contracts.py                    # Expected schema/type/null contracts per dataset
-│   ├── validate.py                     # Lightweight pandas-based suite runner and quarantine logic
-│   └── validate_ge.py                  # Real GX ephemeral context + pandas datasource + batch definitions
-│                                        #   (validate.py kept as a lighter-weight comparison)
-├── transformers/
-│   ├── transform_claims.py             # Flatten nested claim events, split out payments
-│   ├── transform_policy_admin.py       # Type enforcement, dedupe
-│   ├── transform_billing.py
-│   └── transform_weather.py
-├── scripts/
-│   ├── pull_source_data.py             # Pulls source CSVs and claims JSON from Google Drive
-│   ├── seed_policy_admin_db.py         # One-time RDS bootstrap and seed from source CSVs
-│   ├── setup_aws.sh                    # Provisions S3 buckets and RDS from .env, mirrors teardown_aws.sh
-│   ├── sync_source_to_s3.sh            # Chains pull, seed, and all four extractors
-│   ├── update_rds_ip_allowlist.sh      # Updates the RDS security group to your current IP
-│   ├── preflight_check.sh              # Verifies AWS/S3/RDS/Snowflake are all actually working
-│   ├── teardown_aws.sh                 # Tears down RDS, S3, and the security group to stop billing
-│   ├── register_snowflake_key.py       # Registers your RSA public key via browser MFA, no Snowsight needed
-│   └── run_airflow.sh                  # Builds and runs Airflow via Docker (Airflow doesn't support native Windows)
-├── docker/
-│   └── airflow/
-│       └── Dockerfile                  # Extends the official Airflow image with this project's dependencies
-├── docker-compose.airflow.yml          # Single-container Airflow setup, see docs/airflow_setup.md
-├── sql/
-│   ├── ddl/                            # Snowflake table definitions (fact, dims, payments, weather, stage)
-│   ├── merge/                          # COPY INTO and MERGE statements per table
-│   ├── views/                          # Analytics views answering the case study's business questions
-│   └── checks/                         # Idempotency verification query
-├── source_systems/                     # Local raw source data (gitignored)
-├── docs/
-│   ├── architecture-diagram.svg
-│   ├── SETUP_CHECKLIST.md              # Start here: one page, what to fill in, then run preflight_check.sh
-│   ├── data_dictionary.md
-│   ├── aws_cli_setup.md
-│   ├── aws_setup.md
-│   ├── policy_admin_db_setup.md
-│   ├── snowflake_setup.md
-│   ├── snowflake_s3_integration.md
-│   ├── airflow_setup.md
-│   ├── aws_teardown.md
-│   └── source_data_pull.md
-├── tests/
+├── dags/                   # Airflow DAG + etl_scripts package (extractors, validators, transformers)
+├── scripts/                # Setup, teardown, MWAA provisioning, and deployment scripts
+├── sql/                    # Snowflake DDL, staging/merge loaders, analytics views, idempotency checks
+├── docker/                 # Local Airflow image (Airflow doesn't run natively on Windows)
+├── docker-compose.airflow.yml
+├── .github/workflows/      # CI: auto-deploys to MWAA on push to main
+├── docs/                   # Setup guides, data dictionary, MWAA provisioning/deployment docs
+├── tests/                  # pytest suite
+├── source_systems/         # Local raw source data (gitignored)
 ├── .env.example
-├── .gitignore
-├── requirements.txt
-├── LICENSE
 └── README.md
 ```
+ 
+See [`docs/project_structure.md`](docs/project_structure.md) for the full file-by-file layout.
+
 
 ## Prerequisites
 
@@ -160,6 +120,12 @@ sentinel-pipeline/
    python -m validators.validate_ge --all --day 2026-01-15   # real Great Expectations version
    ```
    Both check the same contracts and quarantine the same way. `validate_ge.py` builds a real Great Expectations ephemeral Data Context with a pandas Datasource, one whole-dataframe Batch Definition per dataset, and a genuine `ExpectationSuite` (`ExpectColumnToExist`, `ExpectColumnValuesToNotBeNull`, `ExpectColumnValuesToBeInTypeList`), saved as JSON under `validators/expectation_suites/` on first run. This requires `great_expectations>=1.5` (not the older `0.18.x` API, which lacks the batch definition workflow). `validate.py` is a lighter pandas-only equivalent kept for comparison, it has no Great Expectations dependency at all.
+
+   becomes, after the `etl_scripts` migration:
+   ````bash
+   PYTHONPATH=dags python -m etl_scripts.validators.validate_ge --dataset claims --day 2026-01-15
+   ````
+   (or `cd dags` first, then drop the `PYTHONPATH=dags` prefix)
 
 9. **Run transformation**
    ```bash
@@ -231,6 +197,23 @@ To verify idempotency directly (no duplicate rows regardless of how many times a
 ```bash
 snowsql -c sentinel -f sql/checks/idempotency_check.sql
 ```
+
+
+## Deploying to MWAA
+ 
+Local Docker Airflow (above) proves the pipeline logic. For real managed cloud orchestration:
+ 
+1. **Provision the environment**: [`docs/mwaa_setup.md`](docs/mwaa_setup.md), covers cost (this is the one genuinely expensive piece of this project, read that section first), the VPC/NAT/execution role setup, and `scripts/setup_mwaa.sh`.
+2. **Deploy the DAG and code**: [`docs/mwaa_deploy.md`](docs/mwaa_deploy.md), covers the one-time `etl_scripts` restructuring (MWAA only puts `dags/` on `sys.path`, not the repo root), manual deployment via `scripts/deploy_to_mwaa.sh`, and automated deployment via `.github/workflows/deploy-mwaa.yml` on every push to `main`.
+ 
+```bash
+python scripts/migrate_to_etl_scripts.py   # one-time
+./scripts/setup_mwaa.sh                     # provisions AWS infrastructure
+./scripts/deploy_to_mwaa.sh                 # syncs the DAG and dependencies
+```
+ 
+Always pair a session with `./scripts/teardown_mwaa.sh` when done testing, see the cost breakdown in `docs/mwaa_setup.md`.
+
 
 ## Testing
 

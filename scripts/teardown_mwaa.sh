@@ -141,17 +141,17 @@ if aws s3api head-bucket --bucket "$MWAA_BUCKET" > /dev/null 2>&1; then
   # blocks `s3 rb`. Purge every version explicitly instead.
   echo "Purging all object versions (this bucket has versioning enabled)..."
   aws s3api list-object-versions --bucket "$MWAA_BUCKET" \
-    --query '{Objects: Versions[].{Key:Key,VersionId:VersionId}}' --output json > /tmp/mwaa_versions.json 2>/dev/null || echo '{"Objects": []}' > /tmp/mwaa_versions.json
-  if [ "$(cat /tmp/mwaa_versions.json | grep -c 'Key')" -gt 0 ]; then
-    aws s3api delete-objects --bucket "$MWAA_BUCKET" --delete file:///tmp/mwaa_versions.json > /dev/null || true
+    --query '{Objects: Versions[].{Key:Key,VersionId:VersionId}}' --output json > ./mwaa_versions.json 2>/dev/null || echo '{"Objects": []}' > ./mwaa_versions.json
+  if [ "$(cat ./mwaa_versions.json | grep -c 'Key')" -gt 0 ]; then
+    aws s3api delete-objects --bucket "$MWAA_BUCKET" --delete file://./mwaa_versions.json > /dev/null || true
   fi
 
   aws s3api list-object-versions --bucket "$MWAA_BUCKET" \
-    --query '{Objects: DeleteMarkers[].{Key:Key,VersionId:VersionId}}' --output json > /tmp/mwaa_markers.json 2>/dev/null || echo '{"Objects": []}' > /tmp/mwaa_markers.json
-  if [ "$(cat /tmp/mwaa_markers.json | grep -c 'Key')" -gt 0 ]; then
-    aws s3api delete-objects --bucket "$MWAA_BUCKET" --delete file:///tmp/mwaa_markers.json > /dev/null || true
+    --query '{Objects: DeleteMarkers[].{Key:Key,VersionId:VersionId}}' --output json > ./mwaa_markers.json 2>/dev/null || echo '{"Objects": []}' > ./mwaa_markers.json
+  if [ "$(cat ./mwaa_markers.json | grep -c 'Key')" -gt 0 ]; then
+    aws s3api delete-objects --bucket "$MWAA_BUCKET" --delete file://./mwaa_markers.json > /dev/null || true
   fi
-  rm -f /tmp/mwaa_versions.json /tmp/mwaa_markers.json
+  rm -f ./mwaa_versions.json ./mwaa_markers.json
 
   aws s3 rb "s3://${MWAA_BUCKET}"
   echo "MWAA bucket deleted."

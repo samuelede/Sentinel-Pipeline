@@ -1,0 +1,54 @@
+name: Deploy to MWAA
+
+# Syncs dags/ (including etl_scripts/) and requirements.txt to the MWAA
+# S3 bucket on every push to main that touches those paths. Mirrors what
+# scripts/deploy_to_mwaa.sh does manually, same logic, automated.
+"on":
+  push:
+    branches: [main]
+    paths:
+      - "dags/**"
+      - "requirements.txt"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Verify etl_scripts layout exists
+        run: |
+          if [ ! -d "dags/etl_scripts" ]; then
+            echo "dags/etl_scripts/ not found, this deploy would break MWAA's imports. Stopping."
+            exit 1
+          fi
+
+      - name: Sync DAG and etl_scripts to S3
+        run: |
+          aws s3 sync ./dags "s3://${{ secrets.MWAA_BUCKET_NAME }}/dags/" \
+            --exclude "*.pyc" --exclude "__pycache__/*" --delete
+
+      - name: Upload requirements.txt and capture its new version
+        id: upload_requirements
+        run: |
+          VERSION_ID=$(aws s3api put-object \
+            --bucket "${{ secrets.MWAA_BUCKET_NAME }}" \
+            --key "requirements.txt" \
+            --body ./requirements.txt \
+            --query "VersionId" --output text)
+          echo "version_id=$VERSION_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Update MWAA environment to use the new requirements.txt
+        run: |
+          aws mwaa update-environment \
+            --name sentinel-mwaa \
+            --requirements-s3-path "requirements.txt" \
+            --requirements-s3-object-version "${{ steps.upload_requirements.outputs.version_id }}"

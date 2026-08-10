@@ -17,7 +17,7 @@ import boto3
 import pandas as pd
 from dotenv import load_dotenv
 
-from transformers.s3_helpers import load_parquet_or_exit
+from etl_scripts.transformers.s3_helpers import load_parquet_or_exit
 
 load_dotenv()
 
